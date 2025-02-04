@@ -1,0 +1,11 @@
+git status
+git add -A
+git commit -m "Message"
+git push origin
+
+
+To change branch: git checkout <branch>
+
+To create new branch: git branch <branch>
+
+git branch list
