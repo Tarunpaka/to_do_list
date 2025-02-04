@@ -1,0 +1,248 @@
+
+# Advanced To-Do List App with Time Tracking and NLP
+
+## Project Structure
+
+advanced-todo-app/
+│── backend/
+│   ├── models/
+│   │   ├── Task.js
+│   ├── routes/
+│   │   ├── tasks.js
+│   ├── server.js
+│   ├── package.json
+│── frontend/
+│   ├── components/
+│   │   ├── TaskTimer.js
+│   ├── pages/
+│   │   ├── index.js
+│   ├── package.json
+│── .gitignore
+│── README.md
+│── docker-compose.yml
+
+---
+
+## Backend Code
+
+### 1. Install Dependencies
+
+Run this in the `backend/` directory:
+
+```bash
+npm init -y
+npm install express mongoose dotenv cors body-parser axios node-nlp
+
+2. backend/models/Task.js
+
+Task model to store to-do list tasks, time tracking, and NLP-based priority handling.
+
+const mongoose = require('mongoose');
+
+const TaskSchema = new mongoose.Schema({
+    title: { type: String, required: true },
+    description: { type: String },
+    dueDate: { type: Date },
+    priority: { type: String, enum: ['low', 'medium', 'high'], default: 'medium' },
+    completed: { type: Boolean, default: false },
+    timeSpent: { type: Number, default: 0 },
+    startTime: { type: Date },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+}, { timestamps: true });
+
+module.exports = mongoose.model('Task', TaskSchema);
+
+3. backend/routes/tasks.js
+
+Routes for managing tasks, including NLP-based priority classification.
+
+const express = require('express');
+const Task = require('../models/Task');
+const { NlpManager } = require('node-nlp');
+const router = express.Router();
+
+const manager = new NlpManager({ languages: ['en'] });
+
+manager.addDocument('en', 'This is urgent', 'priority.high');
+manager.addDocument('en', 'Do this later', 'priority.low');
+manager.addDocument('en', 'This is important', 'priority.medium');
+
+manager.train().then(() => console.log("NLP Model Trained"));
+
+router.post('/add', async (req, res) => {
+    const { title, description } = req.body;
+    const response = await manager.process('en', description);
+    const priority = response.intent === 'priority.high' ? 'high' :
+                     response.intent === 'priority.low' ? 'low' : 'medium';
+
+    const newTask = new Task({ title, description, priority });
+    await newTask.save();
+    res.json({ message: 'Task added', task: newTask });
+});
+
+router.post('/start/:id', async (req, res) => {
+    const task = await Task.findById(req.params.id);
+    task.startTime = new Date();
+    await task.save();
+    res.json({ message: 'Task timer started', task });
+});
+
+router.post('/stop/:id', async (req, res) => {
+    const task = await Task.findById(req.params.id);
+    if (!task.startTime) return res.status(400).json({ message: 'Timer not started' });
+
+    const timeSpent = (new Date() - task.startTime) / (1000 * 60);
+    task.timeSpent += Math.round(timeSpent);
+    task.startTime = null;
+    await task.save();
+
+    res.json({ message: 'Task timer stopped', timeSpent: task.timeSpent, task });
+});
+
+module.exports = router;
+
+4. backend/server.js
+
+Main server file.
+
+const express = require('express');
+const mongoose = require('mongoose');
+const dotenv = require('dotenv');
+const cors = require('cors');
+const taskRoutes = require('./routes/tasks');
+
+dotenv.config();
+const app = express();
+app.use(express.json());
+app.use(cors());
+
+mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+    .then(() => console.log('MongoDB Connected'))
+    .catch(err => console.error(err));
+
+app.use('/api/tasks', taskRoutes);
+
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+Frontend Code
+
+1. Install Dependencies
+
+Run this in the frontend/ directory:
+
+npx create-next-app .
+npm install axios tailwindcss postcss autoprefixer
+npx tailwindcss init -p
+
+2. frontend/components/TaskTimer.js
+
+Component to track time for tasks.
+
+import React, { useState } from 'react';
+import axios from 'axios';
+
+const TaskTimer = ({ taskId }) => {
+    const [isRunning, setIsRunning] = useState(false);
+
+    const startTimer = async () => {
+        await axios.post(`http://localhost:5000/api/tasks/start/${taskId}`);
+        setIsRunning(true);
+    };
+
+    const stopTimer = async () => {
+        const response = await axios.post(`http://localhost:5000/api/tasks/stop/${taskId}`);
+        alert(`Time spent: ${response.data.timeSpent} minutes`);
+        setIsRunning(false);
+    };
+
+    return (
+        <div>
+            {isRunning ? (
+                <button onClick={stopTimer} className="bg-red-500 text-white p-2">Stop Timer</button>
+            ) : (
+                <button onClick={startTimer} className="bg-green-500 text-white p-2">Start Timer</button>
+            )}
+        </div>
+    );
+};
+
+export default TaskTimer;
+
+3. frontend/pages/index.js
+
+Main page with task tracking.
+
+import React, { useState } from 'react';
+import axios from 'axios';
+import TaskTimer from '../components/TaskTimer';
+
+const Home = () => {
+    const [task, setTask] = useState('');
+    const [description, setDescription] = useState('');
+    const [taskId, setTaskId] = useState(null);
+
+    const addTask = async () => {
+        const response = await axios.post('http://localhost:5000/api/tasks/add', {
+            title: task,
+            description,
+        });
+        setTaskId(response.data.task._id);
+    };
+
+    return (
+        <div className="p-6">
+            <h1 className="text-2xl font-bold">To-Do List App</h1>
+            <input
+                type="text"
+                value={task}
+                onChange={(e) => setTask(e.target.value)}
+                placeholder="Task title"
+                className="border p-2"
+            />
+            <input
+                type="text"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Task description"
+                className="border p-2"
+            />
+            <button onClick={addTask} className="bg-blue-500 text-white p-2">Add Task</button>
+
+            {taskId && <TaskTimer taskId={taskId} />}
+        </div>
+    );
+};
+
+export default Home;
+
+Docker Configuration
+
+docker-compose.yml
+
+version: '3.8'
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "5000:5000"
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+  mongo:
+    image: mongo
+    ports:
+      - "27017:27017"
+
+Final Steps
+
+1. Run Backend
+
+cd backend
+node server.js
+
+2. Run Frontend
+
+cd frontend
+npm run dev
